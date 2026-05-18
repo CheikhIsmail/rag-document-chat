@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Tuple
 import fitz
 import faiss
 import numpy as np
+from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ load_dotenv()
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 TOP_K = 3
+CANDIDATE_K = 10
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -106,23 +108,50 @@ def retrieve(query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]:
     query_embedding = query_embedding.astype("float32")
     faiss.normalize_L2(query_embedding)
 
-    scores, indices = index.search(query_embedding, top_k)
+    candidate_k = min(CANDIDATE_K, len(chunks))
+    scores, indices = index.search(query_embedding, candidate_k)
 
-    results = []
-    for score, idx in zip(scores[0], indices[0]):
+    candidates = []
+    for semantic_score, idx in zip(scores[0], indices[0]):
         if idx == -1:
             continue
 
         chunk = chunks[idx]
-        results.append({
+        candidates.append({
             "document": chunk["document"],
             "page": chunk["page"],
             "chunk_id": chunk["chunk_id"],
             "text": chunk["text"],
-            "score": float(score)
+            "semantic_score": float(semantic_score),
+            "score": float(semantic_score)
         })
 
-    return results
+    if not candidates:
+        return []
+
+    tokenized_corpus = [candidate["text"].lower().split() for candidate in candidates]
+    bm25 = BM25Okapi(tokenized_corpus)
+
+    query_tokens = query.lower().split()
+    bm25_scores = bm25.get_scores(query_tokens)
+
+    max_bm25 = max(bm25_scores) if max(bm25_scores) > 0 else 1.0
+
+    for candidate, bm25_score in zip(candidates, bm25_scores):
+        normalized_bm25 = float(bm25_score / max_bm25)
+        semantic_score = candidate["semantic_score"]
+
+        candidate["bm25_score"] = normalized_bm25
+        candidate["rerank_score"] = (0.7 * semantic_score) + (0.3 * normalized_bm25)
+        candidate["score"] = candidate["rerank_score"]
+
+    candidates = sorted(
+        candidates,
+        key=lambda item: item["rerank_score"],
+        reverse=True
+    )
+
+    return candidates[:top_k]
 
 
 def generate_answer(question: str, retrieved_chunks: List[Dict[str, Any]]) -> str:
@@ -173,6 +202,8 @@ def ask_question(question: str) -> Dict[str, Any]:
             "page": chunk["page"],
             "chunk_id": chunk["chunk_id"],
             "score": chunk["score"],
+            "semantic_score": chunk.get("semantic_score"),
+            "bm25_score": chunk.get("bm25_score"),
             "preview": chunk["text"][:300]
         }
         for chunk in retrieved_chunks
