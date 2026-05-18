@@ -1,6 +1,6 @@
 # RAG Document Chat
 
-A Retrieval-Augmented Generation (RAG) web application that allows users to upload one or more PDF documents and chat with their contents. The system extracts text from uploaded PDFs, splits it into overlapping chunks, generates embeddings, stores them in a FAISS vector index, retrieves the most relevant chunks for a question, and uses an LLM to generate grounded answers with source attribution.
+A Retrieval-Augmented Generation (RAG) web application that allows users to upload one or more PDF documents and chat with their contents. The system extracts text from uploaded PDFs, splits it into overlapping chunks, generates embeddings, stores them in a FAISS vector index, retrieves and re-ranks the most relevant chunks, and uses an LLM to generate grounded answers with source attribution.
 
 ---
 
@@ -13,6 +13,7 @@ A Retrieval-Augmented Generation (RAG) web application that allows users to uplo
 - Vector similarity search using FAISS
 - LLM-based question answering via OpenRouter
 - Source attribution (document name, page number, and preview)
+- BM25 re-ranking of retrieved chunks before the LLM call
 - Retrieval score display
 - Five automated evaluation questions with expected answers
 - FastAPI backend
@@ -28,6 +29,7 @@ A Retrieval-Augmented Generation (RAG) web application that allows users to uplo
 - Streamlit
 - Sentence Transformers (`all-MiniLM-L6-v2`)
 - FAISS
+- BM25 (`rank-bm25`)
 - OpenRouter (OpenAI-compatible API)
 - Docker & Docker Compose
 
@@ -41,10 +43,11 @@ A Retrieval-Augmented Generation (RAG) web application that allows users to uplo
 4. Each chunk is converted into a dense embedding vector.
 5. Embeddings are stored in a FAISS vector index.
 6. When the user asks a question, the query is embedded.
-7. The most relevant chunks are retrieved using cosine similarity.
-8. Retrieved chunks are passed to the LLM as context.
-9. The model generates an answer grounded in the retrieved sources.
-10. The frontend displays the answer, retrieval score, and source citations.
+7. FAISS retrieves candidate chunks using semantic similarity.
+8. Retrieved chunks are re-ranked using BM25 lexical relevance.
+9. The top-ranked chunks are passed to the LLM as context.
+10. The model generates an answer grounded in the retrieved sources.
+11. The frontend displays the answer, retrieval score, and source citations.
 
 ---
 
@@ -54,6 +57,19 @@ The application uses fixed-size text chunks with overlap.
 
 - Chunk size: 800 characters
 - Overlap: 150 characters
+
+## Re-ranking
+
+The system uses a two-stage retrieval pipeline.
+
+First, FAISS retrieves a larger set of candidate chunks based on semantic similarity. Then, the retrieved chunks are re-ranked using BM25 lexical relevance. The final score combines both signals:
+
+- 70% semantic similarity
+- 30% BM25 lexical relevance
+
+This improves retrieval quality because semantic search captures meaning, while BM25 helps prioritize chunks that contain important query terms.
+
+The final top-ranked chunks are passed to the LLM for grounded answer generation.
 
 ### Why Chunking Is Necessary
 
