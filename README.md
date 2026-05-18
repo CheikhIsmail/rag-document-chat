@@ -118,9 +118,6 @@ For a production deployment, file storage would be replaced by object storage su
 
 The backend returns clear HTTP errors for common failure cases, such as uploading invalid files, asking questions before indexing documents, or processing PDFs without readable text.
 
-## Live Demo
-
-https://rag-document-chat-production-b32b.up.railway.app/
 
 ## Evaluation
 
