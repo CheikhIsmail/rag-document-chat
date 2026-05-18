@@ -1,0 +1,18 @@
+# Virtual environments
+.rag/
+rag/
+.venv/
+
+# Secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Uploaded PDFs
+backend/uploads/
+
+# Optional local files
+*.log
+.DS_Store
