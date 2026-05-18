@@ -1,4 +1,4 @@
-# RAG Document Chat
+## RAG Document Chat
 
 A Retrieval-Augmented Generation (RAG) web application that allows users to upload one or more PDF documents and chat with their contents. The system extracts text from uploaded PDFs, splits it into overlapping chunks, generates embeddings, stores them in a FAISS vector index, retrieves and re-ranks the most relevant chunks, and uses an LLM to generate grounded answers with source attribution.
 
