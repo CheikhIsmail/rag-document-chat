@@ -4,6 +4,25 @@ A Retrieval-Augmented Generation (RAG) web application that allows users to uplo
 
 ---
 
+## Screenshots
+
+### Main Interface
+![Main Interface](screenshots/home.png)
+
+### Document Upload and Indexing
+![Upload and Indexing](screenshots/upload.png)
+
+### Chat Response with Source Attribution
+![Chat Response](screenshots/chat.png)
+
+### Automated Evaluation
+![Evaluation](screenshots/evaluation.png)
+
+
+## Live Demo
+
+https://rag-document-chat-production-b32b.up.railway.app/
+
 ## Features
 
 - Upload multiple PDF documents
