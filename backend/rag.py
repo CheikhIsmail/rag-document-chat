@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Dict, Any, Tuple
 
 import faiss
@@ -39,10 +40,10 @@ def table_to_markdown(table: list) -> str:
             for cell in row
         ]
 
-        if any(cell for cell in cleaned_row):
+        if any(cleaned_row):
             cleaned_rows.append(cleaned_row)
 
-    if not cleaned_rows:
+    if len(cleaned_rows) < 2:
         return ""
 
     max_cols = max(len(row) for row in cleaned_rows)
@@ -52,16 +53,62 @@ def table_to_markdown(table: list) -> str:
         for row in cleaned_rows
     ]
 
-    header = normalized_rows[0]
+    headers = normalized_rows[0]
     data_rows = normalized_rows[1:]
 
-    markdown = "| " + " | ".join(header) + " |\n"
-    markdown += "| " + " | ".join(["---"] * max_cols) + " |\n"
+    descriptive_keywords = [
+        "bezeichnung",
+        "positions",
+        "produkt",
+        "nummer",
+        "besonderheiten",
+        "hilfsmittel"
+    ]
+
+    last_values = [""] * max_cols
+    filled_rows = []
 
     for row in data_rows:
+        filled_row = []
+
+        for col_idx, value in enumerate(row):
+            header = headers[col_idx].lower() if col_idx < len(headers) else ""
+
+            if value:
+                last_values[col_idx] = value
+                filled_row.append(value)
+            else:
+                if any(keyword in header for keyword in descriptive_keywords):
+                    filled_row.append(last_values[col_idx])
+                else:
+                    filled_row.append("")
+
+        filled_rows.append(filled_row)
+
+    markdown = "| " + " | ".join(headers) + " |\n"
+    markdown += "| " + " | ".join(["---"] * max_cols) + " |\n"
+
+    for row in filled_rows:
         markdown += "| " + " | ".join(row) + " |\n"
 
-    return markdown.strip()
+    row_records = []
+
+    for row in filled_rows:
+        parts = []
+
+        for header, value in zip(headers, row):
+            header = header.strip()
+            value = value.strip()
+
+            if header and value:
+                parts.append(f"{header}: {value}")
+
+        if parts:
+            row_records.append("- " + " | ".join(parts))
+
+    records_text = "\n".join(row_records)
+
+    return f"{markdown.strip()}\n\nRow records:\n{records_text}".strip()
 
 
 def extract_pdf_content(file_path: str, filename: str) -> List[Dict[str, Any]]:
@@ -216,33 +263,53 @@ def retrieve(query: str, top_k: int = TOP_K) -> List[Dict[str, Any]]:
 
     max_bm25 = max(bm25_scores) if max(bm25_scores) > 0 else 1.0
 
+    money_pattern = re.compile(
+        r"(\d{1,3}(?:\.\d{3})*,\d{2}\s?(?:€|Euro)|\d+\s?(?:€|Euro)|fünf Euro|zehn Euro)",
+        re.IGNORECASE
+    )
+
     price_keywords = [
         "preis", "preise", "betrag", "beträge", "kosten",
         "vergütung", "vergütungen", "pauschale", "pauschalen",
+        "versorgungspauschale", "fallpauschale",
         "euro", "eur", "€", "netto", "brutto",
-        "positionsnummer", "hilfsmittelnummer", "leistung",
-        "abrechnung", "anlage"
+        "vertragspreise", "festbeträge", "kostet", "kosten"
     ]
+
+    query_lower = query.lower()
+    is_money_query = any(keyword in query_lower for keyword in price_keywords)
 
     for candidate, bm25_score in zip(candidates, bm25_scores):
         normalized_bm25 = float(bm25_score / max_bm25)
         semantic_score = candidate["semantic_score"]
+        candidate_text = candidate["text"].lower()
 
         candidate["bm25_score"] = normalized_bm25
 
-        table_boost = 0.15 if candidate.get("type") == "table" else 0.0
+        table_boost = 0.10 if candidate.get("type") == "table" else 0.0
 
-        price_boost = 0.10 if any(
-            keyword in candidate["text"].lower()
+        price_keyword_boost = 0.12 if any(
+            keyword in candidate_text
             for keyword in price_keywords
         ) else 0.0
 
-        candidate["rerank_score"] = (
-            0.65 * semantic_score
-            + 0.25 * normalized_bm25
-            + table_boost
-            + price_boost
-        )
+        exact_money_boost = 0.25 if money_pattern.search(candidate["text"]) else 0.0
+
+        if is_money_query:
+            candidate["rerank_score"] = (
+                0.50 * semantic_score
+                + 0.25 * normalized_bm25
+                + table_boost
+                + price_keyword_boost
+                + exact_money_boost
+            )
+        else:
+            candidate["rerank_score"] = (
+                0.65 * semantic_score
+                + 0.25 * normalized_bm25
+                + table_boost
+                + price_keyword_boost
+            )
 
         candidate["score"] = candidate["rerank_score"]
 
@@ -279,10 +346,8 @@ Answer the user's current question only using the provided document context.
 Use the conversation history only to understand follow-up questions.
 If the answer is not in the document context, say that the document does not contain enough information.
 
-When the question asks for prices, amounts, payments, costs, fees, reimbursements or Euro values:
-- Pay special attention to tables.
-- Extract concrete values if they appear in the context.
-- Mention the page number of each value when possible.
+When tables are included, use both the Markdown table and the row records.
+The row records are normalized table rows created from the PDF to make merged cells easier to understand.
 
 Conversation history:
 {history_text}
