@@ -26,6 +26,7 @@ with st.sidebar:
             st.warning("Please upload at least one PDF.")
         else:
             files = []
+
             for uploaded_file in uploaded_files:
                 files.append(
                     (
@@ -38,14 +39,19 @@ with st.sidebar:
                     )
                 )
 
-            with st.spinner("Uploading, chunking, embedding, and indexing documents..."):
+            with st.spinner("Uploading, extracting text/tables, embedding, and indexing documents..."):
                 response = requests.post(f"{BACKEND_URL}/upload", files=files)
 
             if response.status_code == 200:
                 result = response.json()
+
                 st.success("Documents indexed successfully.")
                 st.write(f"Documents: {result.get('num_documents')}")
                 st.write(f"Chunks: {result.get('num_chunks')}")
+                st.write(f"Text chunks: {result.get('text_chunks')}")
+                st.write(f"Table chunks: {result.get('table_chunks')}")
+
+                st.session_state.messages = []
             else:
                 st.error(response.text)
 
@@ -67,24 +73,70 @@ with st.sidebar:
                 st.write("**Retrieval Score:**", round(item["retrieval_score"], 4))
 
                 top_source = item.get("top_source")
+
                 if top_source:
                     st.write("**Top Source:**")
-                    st.write(f"{top_source.get('document')} — Page {top_source.get('page')}")
-                    st.caption(top_source.get("preview"))
+                    st.write(
+                        f"{top_source.get('document')} — Page {top_source.get('page')} — Type: {top_source.get('type')}"
+                    )
+
+                    with st.expander("Show source preview"):
+                        st.markdown(top_source.get("preview") or "")
         else:
             st.error(response.text)
 
+    st.divider()
+
+    if st.button("Clear Conversation Memory"):
+        st.session_state.messages = []
+        st.success("Conversation memory cleared.")
+
 
 st.header("Chat")
+
+
+def render_sources(sources):
+    if not sources:
+        return
+
+    st.subheader("Sources")
+
+    for source in sources:
+        source_title = (
+            f"{source.get('document')} — Page {source.get('page')} "
+            f"| Type: {source.get('type')} "
+            f"| Score: {round(source.get('score', 0), 4)}"
+        )
+
+        with st.expander(source_title):
+            st.markdown(
+                source.get("full_text")
+                or source.get("preview")
+                or ""
+            )
+
 
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
+        if message["role"] == "assistant":
+            retrieval_score = message.get("retrieval_score")
+            sources = message.get("sources", [])
+
+            if retrieval_score is not None:
+                st.metric("Retrieval Score", round(retrieval_score, 4))
+
+            render_sources(sources)
+
+
 question = st.chat_input("Ask a question about the uploaded PDFs...")
 
 if question:
-    st.session_state.messages.append({"role": "user", "content": question})
+    st.session_state.messages.append({
+        "role": "user",
+        "content": question
+    })
 
     with st.chat_message("user"):
         st.write(question)
@@ -93,7 +145,16 @@ if question:
         with st.spinner("Retrieving sources and generating answer..."):
             response = requests.post(
                 f"{BACKEND_URL}/chat",
-                json={"question": question}
+                json={
+                    "question": question,
+                    "chat_history": [
+                        {
+                            "role": message["role"],
+                            "content": message["content"]
+                        }
+                        for message in st.session_state.messages[-6:]
+                    ]
+                }
             )
 
         if response.status_code == 200:
@@ -104,17 +165,18 @@ if question:
             sources = result.get("sources", [])
 
             st.write(answer)
-            st.metric("Retrieval Score", round(retrieval_score, 4))
 
-            if sources:
-                st.subheader("Sources")
-                for source in sources:
-                    with st.expander(
-                        f"{source['document']} — Page {source['page']} | Score: {round(source['score'], 4)}"
-                    ):
-                        st.write(source["preview"])
+            if retrieval_score is not None:
+                st.metric("Retrieval Score", round(retrieval_score, 4))
 
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+            render_sources(sources)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+                "retrieval_score": retrieval_score,
+                "sources": sources
+            })
 
         else:
             st.error(response.text)

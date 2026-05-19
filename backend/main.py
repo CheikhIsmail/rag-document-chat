@@ -11,8 +11,14 @@ UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     question: str
+    chat_history: list[ChatMessage] = []
 
 
 app = FastAPI(title="RAG Document Chat")
@@ -35,57 +41,50 @@ def root():
 async def upload_pdfs(
     files: Annotated[list[UploadFile], File(description="Upload one or more PDF files")]
 ):
-    # Store uploaded PDF file paths and names
     saved_files = []
 
     try:
-        # Process each uploaded file
         for file in files:
-            # Skip files that are not PDFs
             if not file.filename or not file.filename.lower().endswith(".pdf"):
                 continue
 
-            # Create destination path inside the uploads directory
             file_path = UPLOAD_DIR / file.filename
 
-            # Read file contents and save to disk
             content = await file.read()
             with open(file_path, "wb") as f:
                 f.write(content)
 
-            # Store file path and original filename for indexing
             saved_files.append((str(file_path), file.filename))
 
-        # Return an error if no valid PDFs were uploaded
         if not saved_files:
-            raise HTTPException(
-                status_code=400,
-                detail="No valid PDF files uploaded."
-            )
+            raise HTTPException(status_code=400, detail="No valid PDF files uploaded.")
 
-        # Extract text, generate embeddings, and build the FAISS index
         return build_index(saved_files)
 
     except ValueError as e:
-        # Handle known validation errors (e.g., no readable text)
         raise HTTPException(status_code=400, detail=str(e))
 
-    except Exception:
-        # Handle unexpected processing errors
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail="Failed to process uploaded PDF files."
+            detail=f"Failed to process uploaded PDF files: {str(e)}"
         )
 
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        return ask_question(request.question)
+        return ask_question(
+            question=request.question,
+            chat_history=[msg.model_dump() for msg in request.chat_history]
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to generate answer.")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate answer: {str(e)}"
+        )
 
 
 @app.get("/evaluate")
@@ -95,4 +94,7 @@ def evaluate():
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to run evaluation.")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to run evaluation: {str(e)}"
+        )

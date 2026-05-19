@@ -8,3 +8,5 @@ numpy
 openai
 python-dotenv
 rank-bm25
+pdfplumber
+pandas
